@@ -1,53 +1,50 @@
 """
-LLM client - sends a prompt to a local Ollama model and gets back an answer.
+LLM client - sends a prompt to a configured model and gets back an answer.
 
-Same philosophy as embeddings.py: a small, readable wrapper. Not streaming
-yet (v1 keeps things simple) - see README "Next steps" for how to add
-streaming later without restructuring anything else.
+This now supports multiple providers (Ollama, vLLM) through the provider
+abstraction layer while maintaining backward compatibility.
 """
 
-import httpx
-
-from app.config import settings
-
-
-class LLMError(Exception):
-    """Raised when Ollama fails to generate a response."""
+from app.core.model_providers import get_llm_provider
+from app.core.model_providers.base import LLMError
 
 
+# Maintain backward compatibility with existing imports
 class OllamaLLMClient:
+    """
+    Backward-compatible wrapper for LLM client.
+
+    This class now delegates to the configured provider via the factory pattern,
+    allowing seamless switching between Ollama, vLLM, and future providers.
+    """
+
     def __init__(self, base_url: str | None = None, model: str | None = None):
-        self.base_url = (base_url or settings.ollama_base_url).rstrip("/")
-        self.model = model or settings.llm_model
+        # Store configuration for potential provider-specific initialization
+        self._base_url = base_url
+        self._model = model
+        # Get the configured provider (will use settings from factory)
+        self._provider = get_llm_provider()
 
     async def generate(self, prompt: str, temperature: float = 0.2) -> str:
         """Send a prompt to the LLM and return its text response.
 
-        temperature defaults low (0.2) because for a document Q&A tool we
-        want faithful, consistent answers grounded in the retrieved text,
-        not creative variation.
+        Args:
+            prompt: The input prompt for text generation
+            temperature: Controls randomness (0.2 = more deterministic)
+
+        Returns:
+            str: The generated text response
+
+        Raises:
+            LLMError: If generation fails
+
+        Note:
+            temperature defaults low (0.2) because for a document Q&A tool we
+            want faithful, consistent answers grounded in the retrieved text,
+            not creative variation.
         """
-        url = f"{self.base_url}/api/generate"
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "stream": False,
-            "options": {"temperature": temperature},
-        }
+        return await self._provider.generate(prompt, temperature=temperature)
 
-        async with httpx.AsyncClient(timeout=180.0) as client:
-            try:
-                response = await client.post(url, json=payload)
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise LLMError(
-                    f"Failed to reach Ollama at {url}. "
-                    f"Is Ollama running and is '{self.model}' pulled? "
-                    f"(ollama pull {self.model}) Original error: {exc}"
-                ) from exc
 
-        data = response.json()
-        answer = data.get("response")
-        if answer is None:
-            raise LLMError(f"Ollama returned no response for model '{self.model}'.")
-        return answer.strip()
+# Convenience instance for backward compatibility
+llm_client = OllamaLLMClient()

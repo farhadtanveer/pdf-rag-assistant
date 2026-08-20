@@ -1,0 +1,61 @@
+# Docker Compose configuration for PDF RAG Assistant (CPU deployment)
+# This configuration uses Ollama for local model serving without GPU support
+
+services:
+  # FastAPI Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pdf-rag-app
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - MODEL_PROVIDER=ollama
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-bge-m3}
+      - LLM_MODEL=${LLM_MODEL:-phi4-mini}
+      - CHUNK_SIZE=${CHUNK_SIZE:-800}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-150}
+      - TOP_K_CHUNKS=${TOP_K_CHUNKS:-5}
+      - GPU_ENABLED=false
+    volumes:
+      - ./data/uploads:/app/data/uploads
+      - ./data/chroma_db:/app/data/chroma_db
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    networks:
+      - pdf-rag-network
+
+  # Ollama Service (Local Model Serving)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: pdf-rag-ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - pdf-rag-network
+    # Pull models on first startup
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ollama serve &
+        sleep 5
+        ollama pull ${LLM_MODEL:-phi4-mini} || true
+        ollama pull ${EMBEDDING_MODEL:-bge-m3} || true
+        wait
+
+networks:
+  pdf-rag-network:
+    driver: bridge
+
+volumes:
+  ollama_data:
+    driver: local

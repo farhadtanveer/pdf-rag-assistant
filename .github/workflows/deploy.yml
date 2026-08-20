@@ -1,0 +1,93 @@
+name: Deploy
+
+# Deployment automation on push to main branch
+on:
+  push:
+    branches: ['main']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build production Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run smoke tests
+        run: |
+          # Pull and test the newly built image
+          docker pull ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+          # Start container
+          docker run -d --name smoke-test-app \
+            -p 8000:8000 \
+            -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+
+          # Wait for service to be ready
+          timeout 60 bash -c 'until curl -f http://localhost:8000/health; do sleep 2; done'
+
+          # Run health checks
+          response=$(curl -s http://localhost:8000/health)
+          echo "Health check response: $response"
+
+          # Verify API is responding
+          if echo "$response" | jq -e '.status == "ok"' > /dev/null; then
+            echo "✓ Health check passed"
+          else
+            echo "✗ Health check failed"
+            exit 1
+          fi
+
+          # Cleanup
+          docker stop smoke-test-app
+          docker rm smoke-test-app
+
+      - name: Create deployment summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`ghcr.io/${{ github.repository }}:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Latest Tag**: \`ghcr.io/${{ github.repository }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pull Commands" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ghcr.io/${{ github.repository }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "docker run -p 8000:8000 ghcr.io/${{ github.repository }}:latest" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "## ❌ Deployment Failed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The deployment failed. Please check the logs above for details." >> $GITHUB_STEP_SUMMARY

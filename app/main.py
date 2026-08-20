@@ -10,11 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes import chat, documents
 from app.config import settings
+from app.core.model_providers import check_provider_health
 
 app = FastAPI(
     title="Internal Document RAG Assistant",
     description="Ask questions about uploaded PDFs (supplier datasheets, technical docs) and get answers with page-level citations.",
-    version="0.1.0",
+    version="0.2.0",
 )
 
 # Allows a local React dev server to call this API from the browser.
@@ -30,7 +31,31 @@ app.include_router(chat.router)
 
 
 @app.get("/health", tags=["health"])
-def health_check() -> dict:
-    """Simple liveness check - also useful to confirm the server is up
-    before you start debugging why Ollama calls are failing."""
-    return {"status": "ok"}
+async def health_check() -> dict:
+    """
+    Enhanced health check that verifies:
+    - API server is running
+    - Model provider is accessible
+    - GPU configuration status
+
+    Returns comprehensive health status for monitoring and debugging.
+    """
+    base_health = {"status": "ok", "api": "healthy"}
+
+    try:
+        provider_health = await check_provider_health()
+        base_health.update({
+            "model_provider": provider_health["provider"],
+            "llm_service": "healthy" if provider_health["llm"] else "unhealthy",
+            "embedding_service": "healthy" if provider_health["embedding"] else "unhealthy",
+            "gpu_enabled": provider_health["gpu_enabled"],
+        })
+    except Exception as exc:
+        base_health.update({
+            "model_provider": "error",
+            "llm_service": f"error: {str(exc)}",
+            "embedding_service": f"error: {str(exc)}",
+            "gpu_enabled": settings.gpu_enabled,
+        })
+
+    return base_health

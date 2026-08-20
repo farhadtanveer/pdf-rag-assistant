@@ -4,6 +4,16 @@ Ask questions about internal PDFs (supplier datasheets, technical docs) and get
 answers with page-level citations, so anyone can verify the source. Fully
 self-hosted — no data ever leaves your machine.
 
+## Features
+
+- 🚀 **Modern React Frontend**: Beautiful UI built with Vite + shadcn/ui + Tailwind CSS
+- 📄 **PDF Viewer**: Built-in PDF viewer with page navigation to cited sources
+- 🎯 **Page-Level Citations**: Every answer includes exact page references for verification
+- 🔧 **GPU Scalable**: Ready for GPU deployment with vLLM for production workloads
+- 🐳 **Docker Support**: One-command deployment with Docker Compose
+- 🔒 **Fully Self-Hosted**: Your data never leaves your infrastructure
+- 🌙 **Dark Mode**: Eye-friendly interface for long work sessions
+
 ## How it works
 
 ```
@@ -14,147 +24,372 @@ Ask question -> embed question -> retrieve similar chunks -> build prompt -> loc
 Every chunk keeps its exact page number from the moment it's extracted, which
 is what makes the citations trustworthy instead of guessed.
 
-## Project structure
+## Architecture Overview
 
 ```
-app/
-  config.py              <- all settings in one place
-  main.py                <- FastAPI app, wires routes together
-  api/routes/
-    documents.py          <- POST /documents/upload
-    chat.py                <- POST /chat/ask
-  core/                   <- single-responsibility building blocks
-    pdf_parser.py          <- PDF -> text per page
-    chunker.py              <- text -> overlapping chunks
-    embeddings.py           <- Ollama embedding client
-    llm.py                  <- Ollama chat client
-    vector_store.py         <- Chroma wrapper
-    prompts.py               <- prompt templates (tune answer quality here)
-  services/                <- orchestrates core modules for one use case
-    ingestion_service.py
-    query_service.py
-  models/
-    schemas.py             <- Pydantic request/response contracts
-tests/                     <- unit tests, run with `pytest`
-data/
-  uploads/                <- temp storage during ingestion (auto-cleaned)
-  chroma_db/               <- persistent vector index (survives restarts)
+┌─────────────────┐     ┌──────────────────────┐
+│  React Frontend │────▶│  FastAPI Backend     │
+│  (Vite + TS)    │     │  (Python 3.11)       │
+└─────────────────┘     └──────────────────────┘
+                                │
+                ┌───────────────┼───────────────┐
+                ▼               ▼               ▼
+         ┌───────────┐  ┌─────────────┐  ┌─────────────┐
+         │ ChromaDB  │  │   Ollama    │  │    vLLM     │
+         │ (Vectors) │  │ (Local CPU) │  │ (GPU Mode)  │
+         └───────────┘  └─────────────┘  └─────────────┘
 ```
 
-**Why layered like this:** the API layer only knows HTTP. Services only know
-"do this business task." Core modules each do exactly one thing (parse, chunk,
-embed, store, generate) and don't know about each other. This is what lets you
-change one piece — e.g. swap Chroma for Qdrant, or add a reranker — without
-touching the rest of the app.
+## Project Structure
 
-## Prerequisites
+```
+├── frontend/                    # React TypeScript frontend
+│   ├── src/
+│   │   ├── components/         # UI components (shadcn/ui)
+│   │   ├── lib/
+│   │   │   ├── api/            # API client with TypeScript types
+│   │   │   ├── hooks/          # Custom React hooks
+│   │   │   └── utils/          # Utility functions
+│   │   ├── types/              # TypeScript type definitions
+│   │   └── App.tsx             # Main application component
+│   ├── package.json
+│   └── vite.config.ts          # Vite configuration with API proxy
+├── app/                         # FastAPI Python backend
+│   ├── config.py               # Centralized configuration (GPU settings, providers)
+│   ├── main.py                 # FastAPI application entrypoint
+│   ├── api/routes/
+│   │   ├── documents.py        # Document upload/management endpoints
+│   │   └── chat.py             # Chat/Q&A endpoints
+│   ├── core/
+│   │   ├── model_providers/    # Provider abstraction layer (Ollama, vLLM)
+│   │   │   ├── base.py         # Abstract interfaces
+│   │   │   ├── ollama_provider.py
+│   │   │   ├── vllm_provider.py
+│   │   │   └── factory.py      # Provider selection based on config
+│   │   ├── pdf_parser.py       # PDF -> text per page
+│   │   ├── chunker.py          # Text -> overlapping chunks
+│   │   ├── embeddings.py       # Provider-aware embedding client
+│   │   ├── llm.py              # Provider-aware LLM client
+│   │   ├── vector_store.py     # Chroma wrapper
+│   │   └── prompts.py          # Prompt templates
+│   ├── services/               # Business logic orchestration
+│   └── models/                 # Pydantic schemas
+├── .github/workflows/          # CI/CD pipelines
+│   ├── test.yml                # Automated testing
+│   ├── docker-build.yml        # Docker build and validation
+│   ├── deploy.yml              # Deployment automation
+│   └── security-scan.yml        # Security scanning
+├── tests/                      # Backend unit tests
+├── Dockerfile                  # Multi-stage Docker build
+├── docker-compose.yml          # CPU deployment (Ollama)
+├── docker-compose.gpu.yml      # GPU deployment (vLLM)
+└── requirements.txt            # Python dependencies
+```
 
-1. **Python 3.11+**
-2. **[Ollama](https://ollama.com)** installed and running locally
-3. Pull the two models used by default:
+## Quick Start
+
+### Option 1: Local Development (Frontend + Backend)
+
+#### Backend Setup
+
+1. **Prerequisites**:
+   - Python 3.11+
+   - [Ollama](https://ollama.com) installed and running locally
+   - Node.js 18+ and npm (for frontend)
+
+2. **Install Python dependencies**:
+   ```bash
+   cd pdf-rag-assistant
+   python -m venv .venv
+   source .venv/bin/activate        # Windows: .venv\Scripts\activate
+   pip install -r requirements.txt
+   ```
+
+3. **Configure environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env if needed (defaults work for local development)
+   ```
+
+4. **Pull Ollama models**:
    ```bash
    ollama pull phi4-mini
    ollama pull bge-m3
    ```
 
-## Setup
+5. **Start the backend**:
+   ```bash
+   uvicorn app.main:app --reload
+   ```
+
+#### Frontend Setup
+
+1. **Install frontend dependencies**:
+   ```bash
+   cd frontend
+   npm install
+   ```
+
+2. **Start the development server**:
+   ```bash
+   npm run dev
+   ```
+
+3. **Open your browser**:
+   - Frontend: http://localhost:5173
+   - API docs: http://localhost:8000/docs
+   - Health check: http://localhost:8000/health
+
+### Option 2: Docker Deployment
+
+#### CPU Deployment (Ollama)
 
 ```bash
-cd pdf-rag-assistant
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+# Copy environment file
+cp .env.example .env
 
-pip install -r requirements.txt
+# Start all services
+docker compose up -d
 
-cp .env.example .env             # defaults already match the models above
+# Check health
+curl http://localhost:8000/health
 ```
 
-## Run
+#### GPU Deployment (vLLM)
 
 ```bash
-uvicorn app.main:app --reload
+# Copy GPU configuration
+cp .env.gpu .env
+
+# Start GPU services
+docker compose -f docker-compose.gpu.yml up -d
+
+# Check health
+curl http://localhost:8000/health
 ```
 
-- API docs (interactive, test everything from the browser): http://localhost:8000/docs
-- Health check: http://localhost:8000/health
+## Usage
 
-## Try it
+### Web Interface
 
-**Upload a PDF:**
+1. **Upload Documents**: Click "Upload" button and select PDF files
+2. **Ask Questions**: Type your question in the chat interface
+3. **View Sources**: Click on source citations to navigate to specific pages
+4. **Manage Documents**: View uploaded documents and delete unwanted ones
+
+### API Endpoints
+
+**Upload a PDF**:
 ```bash
 curl -X POST http://localhost:8000/documents/upload \
   -F "file=@/path/to/your/datasheet.pdf"
 ```
 
-**List what's currently ingested** (chunk count per file — handy for spotting accidental double-uploads):
-```bash
-curl http://localhost:8000/documents
-```
-
-**Delete a document** (removes all its chunks):
-```bash
-curl -X DELETE "http://localhost:8000/documents/your-file.pdf"
-```
-
-Re-uploading the same filename overwrites its old chunks rather than duplicating them — chunk IDs are deterministic (hashed from filename + page + position), not random.
-
-**Ask a question:**
+**Ask a question**:
 ```bash
 curl -X POST http://localhost:8000/chat/ask \
   -H "Content-Type: application/json" \
   -d '{"question": "What is the maximum operating temperature?"}'
 ```
 
-Response includes the answer plus a `sources` list with exact filename + page
-number for every chunk that was actually used — this list is built directly
-from the retrieval results, so it's accurate even if the model's own inline
-citation isn't perfect.
+**List documents**:
+```bash
+curl http://localhost:8000/documents
+```
 
-## Run the tests
+**Delete a document**:
+```bash
+curl -X DELETE "http://localhost:8000/documents/your-file.pdf"
+```
+
+## Deployment
+
+### GPU Deployment
+
+For production deployments with GPU support:
+
+1. **Configure environment**:
+   ```bash
+   cp .env.gpu .env
+   # Edit .env with your GPU model choices
+   ```
+
+2. **Deploy with Docker**:
+   ```bash
+   docker compose -f docker-compose.gpu.yml up -d
+   ```
+
+3. **Verify GPU utilization**:
+   ```bash
+   docker compose -f docker-compose.gpu.yml logs -f vllm
+   ```
+
+### CI/CD Pipeline
+
+The project includes automated CI/CD pipelines:
+
+- **Test Suite**: Runs on every pull request
+- **Docker Build**: Validates Docker images and configurations
+- **Security Scan**: Weekly security vulnerability scanning
+- **Deployment**: Automated deployment on main branch pushes
+
+### Environment Variables
+
+Key configuration options:
 
 ```bash
-pytest tests/ -v
-```
+# Model Provider (ollama, vllm, openai)
+MODEL_PROVIDER=ollama
 
-Covers chunking logic and PDF page-extraction accuracy — the two things that
-matter most for citation correctness. These tests don't need Ollama running.
-
-## Known limitations (v1, on purpose — see "Next steps")
-
-- **Scanned PDFs** (image-only, no text layer) aren't handled — `parse_pdf`
-  will raise a clear error rather than silently returning nothing. Add OCR
-  (Tesseract) later if you need this.
-- **No streaming** — answers come back as one response, not token-by-token.
-  Fine for a v1 internal tool; add later if answers feel slow.
-- **No auth** — this is meant to sit inside your office network. Add an auth
-  layer before exposing it more broadly.
-- **Chroma telemetry warnings** in the console (`Failed to send telemetry
-  event...`) are a harmless known bug in Chroma's own code, unrelated to
-  your data — safe to ignore.
-- **Sequential embedding on ingestion** — fine for a handful of PDFs; if you
-  batch-upload hundreds at once, see "When to scale" below.
-
-## Moving from laptop to the office server
-
-Change **`.env`** only:
-```
-OLLAMA_BASE_URL=http://<office-server-ip>:11434
+# Model Selection
+LLM_MODEL=phi4-mini
 EMBEDDING_MODEL=bge-m3
-LLM_MODEL=qwen3:30b-a3b        # or whatever fits the server's GPU
+
+# GPU Settings (for vLLM deployment)
+GPU_ENABLED=true
+GPU_BATCH_SIZE_EMBEDDINGS=64
+GPU_BATCH_SIZE_LLM=8
+
+# Performance Tuning
+MAX_CONCURRENT_REQUESTS=8
+EMBEDDING_TIMEOUT=120
+LLM_TIMEOUT=300
 ```
-No code changes needed — this is the entire point of keeping config
-centralized in `app/config.py`.
 
-## Next steps (roughly in the order I'd tackle them)
+## Development
 
-1. **React frontend** — chat UI + a PDF viewer (`react-pdf`) that jumps to
-   the cited page when a source is clicked.
-2. **Streaming answers** — switch `llm.py`'s `stream: False` to `True` and
-   forward chunks via FastAPI's `StreamingResponse`.
-3. **OCR fallback** for scanned PDFs (Tesseract).
-4. **Delete/list endpoints** for uploaded documents (currently upload-only).
-5. **When to scale past Chroma:** once you're past ~500K–1M chunks (a LOT of
-   PDFs), look at Qdrant or Milvus. Until then, don't — it's not the
-   bottleneck.
-6. **Reranking**: add a second-stage reranker model after retrieval if answer
-   quality needs a boost on larger document sets.
+### Running Tests
+
+```bash
+# Backend tests
+pytest tests/ -v
+
+# With coverage
+pytest tests/ -v --cov=app
+```
+
+### Code Quality
+
+```bash
+# Linting
+ruff check app/ tests/
+
+# Formatting
+ruff format app/ tests/
+
+# Type checking
+mypy app/
+```
+
+### Frontend Development
+
+```bash
+cd frontend
+
+# Development server
+npm run dev
+
+# Type checking
+npm run type-check
+
+# Build for production
+npm run build
+```
+
+## Architecture Decisions
+
+### Provider Abstraction Layer
+
+The application uses a provider abstraction pattern to support multiple model backends:
+
+- **Ollama**: Local CPU-based development
+- **vLLM**: GPU-accelerated production deployment
+- **Future**: Easy addition of OpenAI, Anthropic, or custom providers
+
+This enables seamless switching between development and production environments without code changes.
+
+### Frontend Technology Stack
+
+- **Vite**: Fast development server and optimized production builds
+- **shadcn/ui**: Beautiful, accessible components built on Radix UI
+- **Tailwind CSS**: Utility-first CSS with custom design system
+- **react-pdf**: Client-side PDF rendering with navigation controls
+- **Zustand**: Lightweight state management
+- **TypeScript**: Type-safe development
+
+### Docker Strategy
+
+- **Multi-stage builds**: Minimal production images
+- **Health checks**: Automated container monitoring
+- **Volume persistence**: ChromaDB data survives restarts
+- **GPU support**: Separate compose file for GPU deployments
+
+## Troubleshooting
+
+### Backend Issues
+
+**Ollama connection failed**:
+```bash
+# Verify Ollama is running
+curl http://localhost:11434/api/tags
+
+# Pull required models
+ollama pull phi4-mini
+ollama pull bge-m3
+```
+
+**ChromaDB errors**:
+```bash
+# Clear ChromaDB cache
+rm -rf data/chroma_db/*
+```
+
+### Frontend Issues
+
+**API connection errors**:
+- Ensure backend is running on port 8000
+- Check CORS configuration in `.env`
+
+**PDF viewer errors**:
+- Clear browser cache
+- Check browser console for errors
+
+### Docker Issues
+
+**Container won't start**:
+```bash
+# Check logs
+docker compose logs -f
+
+# Rebuild containers
+docker compose up -d --build
+```
+
+**GPU not detected**:
+```bash
+# Verify NVIDIA Docker runtime
+docker run --rm --gpus all nvidia/cuda:11.0.3-base-ubuntu20.04 nvidia-smi
+```
+
+## Contributing
+
+Contributions are welcome! Please:
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Submit a pull request
+
+Ensure tests pass and follow the code style guidelines.
+
+## License
+
+MIT License - see LICENSE file for details
+
+## Acknowledgments
+
+- FastAPI for the excellent web framework
+- Ollama for local model serving
+- vLLM for GPU-accelerated inference
+- ChromaDB for vector storage
+- shadcn/ui for beautiful UI components
